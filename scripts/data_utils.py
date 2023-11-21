@@ -74,3 +74,6 @@ def load_daily_meteorlogical_predictors(var, yrarr, datadir, maxmin_arg= None):
         da.to_netcdf(f'{datadir}daily/era5_wus_forecast_daily_%s'%var_label + f'_%s.nc'%yr)
     comb_ds= xr.open_mfdataset(f'{datadir}daily/era5_wus_forecast_daily_%s_*.nc'%var_label, parallel=True)
     comb_ds[var_str].to_netcdf(f'{datadir}daily/era5_wus_forecast_daily_%s_2002-2020.nc'%var_label)
+
+def vapor_pressure(temp):
+    return 6.0178*np.exp((17.629*(temp)/(237.3 + (temp)))) #actual vapor pressure in hPa (1 mb = 1 hPa); temp in C
