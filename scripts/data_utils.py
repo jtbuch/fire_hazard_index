@@ -77,3 +77,68 @@ def load_daily_meteorlogical_predictors(var, yrarr, datadir, maxmin_arg= None):
 
 def vapor_pressure(temp):
     return 6.0178*np.exp((17.629*(temp)/(237.3 + (temp)))) #actual vapor pressure in hPa (1 mb = 1 hPa); temp in C
+
+def ds_latlon_subset(ds, area, latname='lat', lonname='lon'):
+    
+    """
+    Function to subset a dataset based on a lat/lon bounding box ("borrowed" from C3S tutorial for seasonal forecasting)
+    """
+    lon1 = area[1] % 360
+    lon2 = area[3] % 360
+    if lon2 >= lon1:
+        masklon = ( (ds[lonname] % 360 <=lon2) & (ds[lonname] % 360 >=lon1) ) 
+    else:
+        masklon = ( (ds[lonname] % 360 <=lon2) | (ds[lonname] % 360 >=lon1) ) 
+        
+    mask = ((ds[latname]<=area[0]) & (ds[latname]>=area[2])) * masklon
+    dsout = ds.where(mask,drop=True)
+    
+    if lon2 < lon1:
+        dsout[lonname] = (dsout[lonname] + 180) % 360 - 180
+        dsout = dsout.sortby(dsout[lonname])        
+    
+    return dsout
+
+def coord_transform(coord_a, coord_b, input_crs= 'WGS84', output_crs= 'EPSG:5070'):
+
+    '''
+    Function to convert coordinates between different reference systems with a little help from pyproj.Transformer
+
+    coord_a: first coordinate (x or longitude)
+    coord_b: second coordinate (y or latitude)
+    input_crs: input coordinate reference system
+    output_crs: output coordinate reference system
+    '''
+    #custom crs i/o with https://gis.stackexchange.com/questions/427786/pyproj-and-a-custom-crs
+    
+    transformer= Transformer.from_crs(input_crs, output_crs, always_xy= True)
+        
+    # we add another if-else loop to account for differences in input size: for different sizes, we first construct a meshgrid,
+    # before transforming coordinates. Thus, the output types will differ depending on the input.
+    if len(coord_a) == len(coord_b):
+        return transformer.transform(coord_a, coord_b) 
+    else:
+        coord_grid_a, coord_grid_b= np.meshgrid(coord_a, coord_b)
+        return transformer.transform(coord_grid_a, coord_grid_b)
+    
+def regridding_func(data_ds, subarea, dsout, regrid_scheme, latname= 'lat', lonname= 'lon'):
+
+    '''
+    Regridding function for downscaling, regridding, and interpolating dynamical forecasts to match APW's 12km grid
+    '''
+
+    tmax_xr= xr.open_dataarray('../data/meteorology/tmax_12km.nc')
+    x_fire_grid= xr.DataArray(coord_transform(tmax_xr.X.values, tmax_xr.Y.values, "epsg:5070", "epsg:4326")[0], dims=('Y','X'))
+    y_fire_grid= xr.DataArray(coord_transform(tmax_xr.X.values, tmax_xr.Y.values, "epsg:5070", "epsg:4326")[1], dims=('Y','X'))
+    maskXY= ~tmax_xr[0].isnull().drop('time')
+
+    data_ds_conus= ds_latlon_subset(data_ds, subarea, latname= latname, lonname= lonname)
+    regridder_data= xe.Regridder(data_ds_conus, dsout, method= regrid_scheme)
+    data_ds_conus_regridded= regridder_data(data_ds_conus, keep_attrs=True)
+
+    data_ds_conus_XY_regridded= data_ds_conus_regridded.interp({'lat':y_fire_grid, 'lon':x_fire_grid}, method='linear').load()
+    data_ds_conus_XY_regridded= data_ds_conus_XY_regridded.assign_coords({'X': (('X'), tmax_xr.X.data, {"units": "meters"}), 'Y': (('Y'), tmax_xr.Y.data, {"units": "meters"})}).drop_vars(['lat','lon'])
+    data_ds_conus_XY= data_ds_conus_XY_regridded.where(maskXY)
+
+    return data_ds_conus_XY
+
