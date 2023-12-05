@@ -9,6 +9,7 @@ from math import factorial
 import itertools
 from copy import deepcopy
 from tqdm import tqdm
+import re # for regular expressions
 
 import netCDF4 # module that reads in .nc files (built on top of HDF5 format)
 import pandas as pd
@@ -205,8 +206,9 @@ def init_fire_alloc_gdf(lcgdf, res= '12km'):
 
     ba_raster= xr.open_dataarray('../data/12km/fire_raster_2002-2021_12km.nc') 
     
-    grid, rows, cols= init_grid(ba_raster, res)    
-    fire_gdf= lcgdf[['id', 'ig_day', 'dy_ar_km2', 'tot_ar_km2', 'geometry']]
+    grid, rows, cols= init_grid(ba_raster, res)
+    cellwidth= int(re.findall(r'\d+', '12km')[0])*1000    
+    fire_gdf= lcgdf[['id', 'ig_day', 'event_ig_day', 'dy_ar_km2', 'tot_ar_km2', 'geometry']]
                                
     merged= gpd.overlay(fire_gdf, grid, how= 'intersection')
     merged= merged.sort_values(by= ['id']).reset_index()
@@ -215,9 +217,14 @@ def init_fire_alloc_gdf(lcgdf, res= '12km'):
     coord_arr= np.array(list(itertools.product(np.linspace(0, len(rows) - 1, len(rows), dtype= int), np.linspace(0, len(cols) - 1, len(cols), dtype= int))))
     merged['grid_y']= [coord_arr[merged['grid_indx'].loc[[ind]]][0][0] for ind in merged.index]
     merged['grid_x']= [coord_arr[merged['grid_indx'].loc[[ind]]][0][1] for ind in merged.index]
+    
+    areagroups= merged.groupby('id')
+    gridfracarr= np.hstack([((areagroups.get_group(k).area/cellwidth**2)/np.linalg.norm(areagroups.get_group(k).area/cellwidth**2, 1)).to_numpy() \
+                                                                                                                 for k in areagroups.groups.keys()])
+    merged['cell_frac']= gridfracarr
 
     for m in tqdm(merged.index.to_numpy()):
-        ba_raster[dict(time= merged['ig_day'].loc[m], Y= merged['grid_y'].loc[m], X= merged['grid_x'].loc[m])]+= merged['dy_ar_km2'].loc[m]
+        ba_raster[dict(time= merged['event_ig_day'].loc[m], Y= merged['grid_y'].loc[m], X= merged['grid_x'].loc[m])]+= (merged['cell_frac'].loc[m] * merged['tot_ar_km2'].loc[m])
 
     return ba_raster
 
