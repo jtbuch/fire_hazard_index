@@ -196,7 +196,7 @@ def init_grid(firedat, res):
     
     return grid, rows, cols
 
-def init_fire_alloc_gdf(lcgdf, res= '12km'): 
+def init_fire_alloc_gdf(lcgdf, res= '12km', lctype= 'forest', sav_flag= False): 
     
     '''
     Function to initialize burned area raster grid
@@ -204,7 +204,8 @@ def init_fire_alloc_gdf(lcgdf, res= '12km'):
     lcgdf: MODIS fire perimeter GeoPandas dataframe 
     '''
 
-    ba_raster= xr.open_dataarray('../data/12km/fire_raster_2002-2021_12km.nc') 
+    ba_raster= xr.open_dataarray('../data/12km/fire_raster_2002-2021_12km.nc')
+    ind_raster= ba_raster.copy(deep= True) # select only X and Y coordinates of ba_raster
     
     grid, rows, cols= init_grid(ba_raster, res)
     cellwidth= int(re.findall(r'\d+', '12km')[0])*1000    
@@ -225,7 +226,10 @@ def init_fire_alloc_gdf(lcgdf, res= '12km'):
 
     for m in tqdm(merged.index.to_numpy()):
         ba_raster[dict(time= merged['event_ig_day'].loc[m], Y= merged['grid_y'].loc[m], X= merged['grid_x'].loc[m])]+= (merged['cell_frac'].loc[m] * merged['tot_ar_km2'].loc[m])
+        ind_raster[dict(time= merged['event_ig_day'].loc[m], Y= merged['grid_y'].loc[m], X= merged['grid_x'].loc[m])]= merged['id'].loc[m]
 
-    return ba_raster
-
-
+    if sav_flag:
+        ba_raster.to_netcdf('../data/12km/%s'%lctype + '_burned_area_2002-2021_12km.nc')
+        ind_raster.to_netcdf('../data/12km/%s'%lctype + '_fid_2002-2021_12km.nc')
+    
+    return ba_raster, ind_raster
