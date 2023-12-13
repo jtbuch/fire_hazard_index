@@ -233,3 +233,104 @@ def init_fire_alloc_gdf(lcgdf, res= '12km', lctype= 'forest', sav_flag= False):
         ind_raster.to_netcdf('../data/12km/%s'%lctype + '_fid_2002-2021_12km.nc')
     
     return ba_raster, ind_raster
+
+def init_fire_clim_df(lctype= 'forest'):
+
+    '''
+    Function to initialize a dataframe with climate predictors for each fire ignition point by land cover type
+
+    '''
+
+    #Fire ignition points
+    #lc_xarr= xr.open_dataarray('../data/12km/%s'%lctype + '_burned_area_2002-2021_12km.nc')
+    lc_fid_xarr= xr.open_dataarray('../data/12km/%s'%lctype + '_fid_2002-2021_12km.nc')
+    lc_df= lc_fid_xarr.to_dataframe('fid').reset_index()
+
+    lc_df= lc_df[lc_df.fid > 0]
+    lc_df.drop_duplicates(subset=['fid'], inplace= True)
+    lc_df.date= pd.to_datetime(lc_df.time)
+    lc_df= lc_df[(lc_df.time.dt.month > 3) & (lc_df.time.dt.month < 10) & (lc_df.time >= '2002-08-01') & (lc_df.time <= '2020-09-01')]
+
+    #Climate predictors
+    vpd_data= xr.open_dataarray('../data/12km/VPD_daily_conus_2002-2020_12km.nc')
+    tmax_data= xr.open_dataarray('../data/12km/tmax_daily_conus_2002-2020_12km.nc')
+    tmin_data= xr.open_dataarray('../data/12km/tmin_daily_conus_2002-2020_12km.nc')
+    prec_data= xr.open_dataarray('../data/12km/prec_daily_conus_2002-2020_12km.nc').resample(time='1D').first()
+    sm_data= xr.open_dataset('../data/12km/casm_conus_12km.nc').CASM_soil_moisture
+    sm_data= sm_data.interpolate_na(dim= 'date', fill_value= 'extrapolate')
+    csif_data_ur= xr.open_dataarray('../data/12km/csif_clear_inst_conus_12km.nc')
+    csif_data= csif_data_ur.interp(time= sm_data.date.values)
+    csif_data= csif_data.interpolate_na(dim= 'time', fill_value= 'extrapolate')
+
+    tmp_vpd= vpd_data.sel(time= lc_df.time.values)
+    tmp_prec= prec_data.sel(time= lc_df.time.values)
+    tmp_tmax= tmax_data.sel(time= lc_df.time.values)
+    tmp_tmin= tmin_data.sel(time= lc_df.time.values)
+
+    vpd_data_arr= []
+    tmax_data_arr= []
+    tmin_data_arr= []
+    prec_data_arr= []
+    rcsif_data_arr= []
+    sm_data_arr= []
+    ant_vpd_1_arr= []
+    ant_prec_1_arr= []
+    ant_sm_1_arr= []
+    ant_vpd_2_arr= []
+    ant_prec_2_arr= []
+    ant_sm_2_arr= []
+    ant_vpd_3_arr= []
+    ant_prec_3_arr= []
+    ant_sm_3_arr= []
+
+    for ind in tqdm(range(len(lc_df))):
+        vpd_data_arr.append(tmp_vpd.sel(time= lc_df.iloc[ind].time, Y= lc_df.iloc[ind].Y, X= lc_df.iloc[ind].X).mean().values)
+        tmax_data_arr.append(tmp_tmax.sel(time= lc_df.iloc[ind].time, Y= lc_df.iloc[ind].Y, X= lc_df.iloc[ind].X).mean().values)
+        tmin_data_arr.append(tmp_tmin.sel(time= lc_df.iloc[ind].time, Y= lc_df.iloc[ind].Y, X= lc_df.iloc[ind].X).mean().values)
+        prec_data_arr.append(tmp_prec.sel(time= lc_df.iloc[ind].time, Y= lc_df.iloc[ind].Y, X= lc_df.iloc[ind].X).mean().values)
+        sm_data_arr.append(sm_data.sel(date= lc_df.iloc[ind].time, Y= lc_df.iloc[ind].Y, X= lc_df.iloc[ind].X, method= 'nearest').values)
+        rcsif_data_arr.append((csif_data.sel(time= lc_df.iloc[ind].time, Y= lc_df.iloc[ind].Y, X= lc_df.iloc[ind].X, method= 'nearest')/csif_data.sel(Y= lc_df.iloc[ind].Y, \
+                                                                                                                X= lc_df.iloc[ind].X).max()).values)
+        ant_vpd_1_arr.append(vpd_data.sel(time= pd.date_range(end= lc_df.iloc[ind].time, periods= 15, inclusive= 'left'), Y= lc_df.iloc[ind].Y, \
+                                                                                                                    X= lc_df.iloc[ind].X).mean(dim= 'time').values)
+        ant_prec_1_arr.append(prec_data.sel(time= pd.date_range(end= lc_df.iloc[ind].time, periods= 15, inclusive= 'left'), Y= lc_df.iloc[ind].Y, \
+                                                                                                                    X= lc_df.iloc[ind].X).mean(dim= 'time').values)
+        ant_sm_1_arr.append(sm_data.sel(date= pd.date_range(end= lc_df.iloc[ind].time, periods= 5, inclusive= 'left'), Y= lc_df.iloc[ind].Y, \
+                                                                                                                    X= lc_df.iloc[ind].X, method= 'nearest').mean(dim= 'date').values)
+        ant_vpd_2_arr.append(vpd_data.sel(time= pd.date_range(end= lc_df.iloc[ind].time, periods= 30, inclusive= 'left'), Y= lc_df.iloc[ind].Y, \
+                                                                                                                    X= lc_df.iloc[ind].X).mean(dim= 'time').values)
+        ant_prec_2_arr.append(prec_data.sel(time= pd.date_range(end= lc_df.iloc[ind].time, periods= 30, inclusive= 'left'), Y= lc_df.iloc[ind].Y, \
+                                                                                                                    X= lc_df.iloc[ind].X).mean(dim= 'time').values)
+        ant_sm_2_arr.append(sm_data.sel(date= pd.date_range(end= lc_df.iloc[ind].time, periods= 10, inclusive= 'left'), Y= lc_df.iloc[ind].Y, \
+                                                                                                                    X= lc_df.iloc[ind].X, method= 'nearest').mean(dim= 'date').values)
+        ant_vpd_3_arr.append(vpd_data.sel(time= pd.date_range(end= lc_df.iloc[ind].time, periods= 60, inclusive= 'left'), Y= lc_df.iloc[ind].Y, \
+                                                                                                                    X= lc_df.iloc[ind].X).mean(dim= 'time').values)
+        ant_prec_3_arr.append(prec_data.sel(time= pd.date_range(end= lc_df.iloc[ind].time, periods= 60, inclusive= 'left'), Y= lc_df.iloc[ind].Y, \
+                                                                                                                    X= lc_df.iloc[ind].X).mean(dim= 'time').values)
+        ant_sm_3_arr.append(sm_data.sel(date= pd.date_range(end= lc_df.iloc[ind].time, periods= 20, inclusive= 'left'), Y= lc_df.iloc[ind].Y, \
+                                                                                                                    X= lc_df.iloc[ind].X, method= 'nearest').mean(dim= 'date').values)
+
+    vpd_data_arr= np.array(vpd_data_arr).flatten()
+    tmax_data_arr= np.array(tmax_data_arr).flatten()
+    tmin_data_arr= np.array(tmin_data_arr).flatten()
+    prec_data_arr= np.array(prec_data_arr).flatten()
+    rcsif_data_arr= np.nan_to_num(rcsif_data_arr, nan= -999).flatten()
+    sm_data_arr= np.nan_to_num(sm_data_arr, nan= -999).flatten()
+    ant_vpd_1_arr= np.array(ant_vpd_1_arr).flatten()
+    ant_prec_1_arr= np.array(ant_prec_1_arr).flatten()
+    ant_sm_1_arr= np.nan_to_num(ant_sm_1_arr, nan= -999).flatten()
+    ant_vpd_2_arr= np.array(ant_vpd_2_arr).flatten()
+    ant_prec_2_arr= np.array(ant_prec_2_arr).flatten()
+    ant_sm_2_arr= np.nan_to_num(ant_sm_2_arr, nan= -999).flatten()
+    ant_vpd_3_arr= np.array(ant_vpd_3_arr).flatten()
+    ant_prec_3_arr= np.array(ant_prec_3_arr).flatten()
+    ant_sm_3_arr= np.nan_to_num(ant_sm_3_arr, nan= -999).flatten()
+
+    lc_fire_clim_df= pd.concat([lc_df.reset_index(), pd.DataFrame({'VPD': vpd_data_arr, 'Tmax': tmax_data_arr, 'Tmin': tmin_data_arr, 'Prec': prec_data_arr, \
+                                'SM': sm_data_arr, 'rcSIF': rcsif_data_arr, \
+                                'Ant_VPD_15d': ant_vpd_1_arr, 'Ant_Prec_15d': ant_prec_1_arr, 'Ant_SM_15d': ant_sm_1_arr, \
+                                'Ant_VPD_1mo': ant_vpd_2_arr, 'Ant_Prec_1mo': ant_prec_2_arr, 'Ant_SM_1mo': ant_sm_2_arr, \
+                                'Ant_VPD_2mo': ant_vpd_3_arr, 'Ant_Prec_2mo': ant_prec_3_arr, 'Ant_SM_2mo': ant_sm_3_arr})], axis= 1).drop(columns= ['index'])
+    lc_fire_clim_df['fid']= lc_fire_clim_df['fid'].astype(int)
+
+    return lc_fire_clim_df
